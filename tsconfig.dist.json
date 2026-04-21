@@ -5,5 +5,6 @@
     "inlineSources": true,
     "rootDir": "./src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts", "src/test-utils.ts"]
 }
