@@ -13,3 +13,19 @@ A drop-in replacement for console.log with hierarchical namespaces and advanced 
 `npm i scope-log`
 
 `yarn add scope-log`
+
+## Development
+
+`pnpm run format`
+
+`pnpm run format:check`
+
+`pnpm run lint`
+
+`pnpm run typecheck`
+
+`pnpm run knip`
+
+`pnpm run build`
+
+`pnpm run test`

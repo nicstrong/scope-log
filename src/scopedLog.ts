@@ -102,7 +102,7 @@ export function reset() {
 
 export function shouldLog(
   checkLevel: LogLevel,
-  namespace: string | RootNamespaceType
+  namespace: string | RootNamespaceType,
 ): boolean {
   const [parts, _isWildcard] = namespaceParts(namespace, false)
   const [nodes, remaining] = findNearestNode(parts)
@@ -128,7 +128,7 @@ export function shouldLog(
 
 export function setLogLevel(
   namespace: string | RootNamespaceType,
-  level: LogLevel
+  level: LogLevel,
 ) {
   const [parts, isWildcard] = namespaceParts(namespace, true)
   const [nodes, remaining] = findNearestNode(parts)
@@ -172,7 +172,7 @@ export function setLogLevel(
 // Finds the nearest node in the namespace tree
 // and returns it along with the remaining namespace parts
 function findNearestNode(
-  namespaceParts: string[]
+  namespaceParts: string[],
 ): readonly [NamespaceNode[], string[]] {
   let currentNode = _namespaces
   const visited: NamespaceNode[] = [currentNode]

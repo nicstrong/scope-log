@@ -13,12 +13,9 @@ describe('shouldLog — default root (INFO)', () => {
     { level: LogLevel.INFO, expected: true },
     { level: LogLevel.LOG, expected: false },
     { level: LogLevel.DEBUG, expected: false },
-  ])(
-    '$level at root → $expected (INFO default)',
-    ({ level, expected }) => {
-      expect(shouldLog(level, RootNamespace)).toBe(expected)
-    }
-  )
+  ])('$level at root → $expected (INFO default)', ({ level, expected }) => {
+    expect(shouldLog(level, RootNamespace)).toBe(expected)
+  })
 
   it('unknown namespaces inherit the root cascading level', () => {
     expect(shouldLog(LogLevel.INFO, 'Anything:At:All')).toBe(true)

@@ -6,7 +6,7 @@ export const ROOT_NAMESPACE_KEY = '$'
 
 export function namespaceParts(
   namespace: string | RootNamespaceType,
-  allowWildcard: boolean
+  allowWildcard: boolean,
 ): [string[], boolean] {
   if (namespace === RootNamespace) {
     return [[], false]
@@ -19,7 +19,7 @@ export function namespaceParts(
   }
   if (namespace.includes('::')) {
     throw new Error(
-      `Namespace "${namespace}" cannot contain empty segments (e.g., "Level1::Level2").`
+      `Namespace "${namespace}" cannot contain empty segments (e.g., "Level1::Level2").`,
     )
   }
   const parts = namespace.split(':')
@@ -32,7 +32,7 @@ export function namespaceParts(
     isWildcard = true
     if (!allowWildcard) {
       throw new Error(
-        `Namespace "${namespace}" cannot end with a wildcard token '${WILDCARD_NAMESPACE_TOKEN}'.`
+        `Namespace "${namespace}" cannot end with a wildcard token '${WILDCARD_NAMESPACE_TOKEN}'.`,
       )
     }
     parts.pop()

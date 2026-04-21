@@ -38,7 +38,7 @@ describe('namespaceParts — wildcards', () => {
     'pops trailing "*" from "$input" when allowWildcard=true',
     ({ input, parts }) => {
       expect(namespaceParts(input, true)).toEqual([parts, true])
-    }
+    },
   )
 
   it('throws when a trailing wildcard is seen but not allowed', () => {

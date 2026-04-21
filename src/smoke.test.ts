@@ -7,8 +7,8 @@ import {
   setLogLevel,
   shouldLog,
 } from './scopedLog.js'
-import { LogLevel, type Outputter } from './types.js'
 import { scopedTest as it } from './test-utils.js'
+import { LogLevel, type Outputter } from './types.js'
 
 // End-to-end coverage anchored to docs/analysis.md. Each test maps to a
 // named example and must continue to pass verbatim after internal refactors.

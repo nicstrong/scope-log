@@ -1,7 +1,7 @@
 import { describe, expect } from 'vitest'
 import { RootNamespace, scopedLog } from './scopedLog.js'
-import { LogLevel } from './types.js'
 import { scopedTest as it } from './test-utils.js'
+import { LogLevel } from './types.js'
 
 describe('scopedLog — logger factory', () => {
   it('prefixes calls with "[namespace]" and emits at LOG', ({
@@ -20,13 +20,16 @@ describe('scopedLog — logger factory', () => {
     { method: 'info', level: LogLevel.INFO },
     { method: 'log', level: LogLevel.LOG },
     { method: 'debug', level: LogLevel.DEBUG },
-  ] as const)('.$method dispatches at $level', ({ method, level }, { captureAtDebug }) => {
-    const log = scopedLog('ns')
-    log[method]('payload', 1, 2)
-    expect(captureAtDebug).toEqual([
-      { level, args: ['[ns]', 'payload', 1, 2] },
-    ])
-  })
+  ] as const)(
+    '.$method dispatches at $level',
+    ({ method, level }, { captureAtDebug }) => {
+      const log = scopedLog('ns')
+      log[method]('payload', 1, 2)
+      expect(captureAtDebug).toEqual([
+        { level, args: ['[ns]', 'payload', 1, 2] },
+      ])
+    },
+  )
 
   it('direct call is equivalent to .log', ({ captureAtDebug }) => {
     const log = scopedLog('ns')

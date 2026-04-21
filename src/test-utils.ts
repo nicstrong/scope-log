@@ -9,8 +9,8 @@ import {
 } from './scopedLog.js'
 import { LogLevel, type Outputter } from './types.js'
 
-export type CapturedCall = { level: LogLevel; args: unknown[] }
-export type Captured = CapturedCall[]
+type CapturedCall = { level: LogLevel; args: unknown[] }
+type Captured = CapturedCall[]
 
 type Fixtures = {
   /**
@@ -45,12 +45,12 @@ function teardown() {
 }
 
 export const scopedTest = base.extend<Fixtures>({
-  capture: async ({}, use) => {
+  capture: async ({ task: _task }, use) => {
     const calls = installCaptureSink()
     await use(calls)
     teardown()
   },
-  captureAtDebug: async ({}, use) => {
+  captureAtDebug: async ({ task: _task }, use) => {
     const calls = installCaptureSink()
     setLogLevel('$:*', LogLevel.DEBUG)
     await use(calls)

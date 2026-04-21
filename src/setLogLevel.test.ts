@@ -99,7 +99,7 @@ describe('setLogLevel — overlapping assignments on the same node', () => {
     setLogLevel('A:*', LogLevel.WARN)
     setLogLevel('A:*', LogLevel.DEBUG)
     expect(getNamespaces().children.get('A')!.cascadingLevel).toBe(
-      LogLevel.DEBUG
+      LogLevel.DEBUG,
     )
   })
 })
