@@ -31,6 +31,25 @@ export function scopedLog(namespace: string | RootNamespaceType) {
 
 let outputters: Outputter[] = [ConsoleOutputter]
 
+export function addOutputter(outputter: Outputter): void {
+  outputters.push(outputter)
+}
+
+export function removeOutputter(outputter: Outputter): boolean {
+  const index = outputters.indexOf(outputter)
+  if (index === -1) return false
+  outputters.splice(index, 1)
+  return true
+}
+
+export function getOutputters(): readonly Outputter[] {
+  return outputters
+}
+
+export function resetOutputters(): void {
+  outputters = [ConsoleOutputter]
+}
+
 function logToOutputters(
   namespace: string | RootNamespaceType,
   level: LogLevel,

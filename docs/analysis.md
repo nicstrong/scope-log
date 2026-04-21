@@ -55,6 +55,10 @@ Everything exported from the package root (see [src/index.ts](../src/index.ts)):
 | `shouldLog`               | function   | Predicate — would a given level log under a given namespace?    |
 | `reset`                   | function   | Clear the namespace tree back to defaults.                      |
 | `getNamespaces`           | function   | Read the internal namespace tree (inspection / debugging).      |
+| `addOutputter`            | function   | Register a custom sink alongside the defaults.                  |
+| `removeOutputter`         | function   | Unregister a previously added sink.                             |
+| `getOutputters`           | function   | Read the current outputter list (read-only).                    |
+| `resetOutputters`         | function   | Restore the default `[ConsoleOutputter]` list.                  |
 | `LogLevel`                | enum       | Ordered log levels from `SILENT` (0) to `DEBUG` (5).            |
 | `Outputter`               | type       | Function signature for pluggable sinks.                         |
 | `ConsoleOutputter`        | value      | Default outputter that forwards to `console.*`.                 |
@@ -235,17 +239,22 @@ fans out to `console.error/warn/info/log/debug` based on level. `SILENT` is
 simply not handled — at the outputter level it's a no-op, and `shouldLog`
 blocks it earlier anyway.
 
-> **Caveat for consumers**: as of the current version the outputter list is an
-> **internal** module-level array in [src/scopedLog.ts:32](../src/scopedLog.ts).
-> There is no exported `addOutputter` / `setOutputters`. If you need a custom
-> sink (e.g. ship logs to Sentry, a remote collector, or an in-page overlay),
-> you either:
->
-> - Call your sink inside a wrapping logger of your own, or
-> - Open an issue / PR upstream to expose the registration API.
->
-> The `Outputter` type and `ConsoleOutputter` value are exported so you can
-> build one that matches the contract, even if you can't register it yet.
+Register custom sinks with `addOutputter` / `removeOutputter`:
+
+```ts
+import { addOutputter, removeOutputter, type Outputter } from 'scope-log'
+
+const sentrySink: Outputter = (level, message, ...rest) => {
+  if (level === LogLevel.ERROR) Sentry.captureMessage(String(message))
+}
+
+addOutputter(sentrySink)
+// …later
+removeOutputter(sentrySink)
+```
+
+`getOutputters()` returns the current list (read-only), and `resetOutputters()`
+restores the default `[ConsoleOutputter]` — useful in tests.
 
 ### 5. Inspection & tests
 
@@ -349,4 +358,5 @@ If you remember three things:
    the root (`INFO` by default) wins.
 
 Everything else — `shouldLog`, `reset`, `getNamespaces`, `Outputter`,
-`RootNamespace` — is there for tests, tooling, and extension points.
+`addOutputter` / `removeOutputter`, `RootNamespace` — is there for tests,
+tooling, and extension points.

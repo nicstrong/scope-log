@@ -6,8 +6,12 @@ import {
   RootNamespace,
   setLogLevel,
   shouldLog,
+  addOutputter,
+  removeOutputter,
+  getOutputters,
+  resetOutputters,
 } from './scopedLog.js'
-import { LogLevel } from './types.js'
+import { LogLevel, type Outputter } from './types.js'
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 describe('scopedLog tests', () => {
@@ -158,5 +162,86 @@ describe('setLogLevel tests', () => {
     setLogLevel('$:*', LogLevel.DEBUG)
     expect(getNamespaces().cascadingLevel).toBe(LogLevel.DEBUG)
     expect(getNamespaces().nodeLevel).toBe(null)
+  })
+})
+
+describe('outputter registration', () => {
+  let originalLog: any
+  let logs: any[]
+
+  beforeEach(() => {
+    resetOutputters()
+    setLogLevel('$:*', LogLevel.DEBUG)
+    logs = []
+    originalLog = console.log
+    console.log = (...args: any[]) => logs.push(args)
+  })
+
+  afterEach(() => {
+    console.log = originalLog
+    resetOutputters()
+  })
+
+  it('should dispatch to a registered outputter', () => {
+    const captured: Array<[LogLevel, any[]]> = []
+    const sink: Outputter = (level, message, ...rest) => {
+      captured.push([level, [message, ...rest]])
+    }
+    addOutputter(sink)
+    scopedLog('ns')('hello', 1)
+    expect(captured).toHaveLength(1)
+    expect(captured[0]![0]).toBe(LogLevel.LOG)
+    expect(captured[0]![1]).toEqual(['[ns]', 'hello', 1])
+  })
+
+  it('should dispatch to all registered outputters alongside the default', () => {
+    const a: any[] = []
+    const b: any[] = []
+    addOutputter((level, message, ...rest) => a.push([level, message, ...rest]))
+    addOutputter((level, message, ...rest) => b.push([level, message, ...rest]))
+    scopedLog('ns').info('hi')
+    expect(a).toHaveLength(1)
+    expect(b).toHaveLength(1)
+    expect(logs).toHaveLength(0) // info is not console.log
+  })
+
+  it('should remove a registered outputter and return true', () => {
+    const captured: any[] = []
+    const sink: Outputter = (level, message) => captured.push([level, message])
+    addOutputter(sink)
+    expect(removeOutputter(sink)).toBe(true)
+    scopedLog('ns')('after-remove')
+    expect(captured).toHaveLength(0)
+  })
+
+  it('should return false when removing an unregistered outputter', () => {
+    const sink: Outputter = () => {}
+    expect(removeOutputter(sink)).toBe(false)
+  })
+
+  it('should expose the current outputter list as readonly', () => {
+    const before = getOutputters().length
+    const sink: Outputter = () => {}
+    addOutputter(sink)
+    expect(getOutputters().length).toBe(before + 1)
+    expect(getOutputters()).toContain(sink)
+  })
+
+  it('should restore the default outputter list on resetOutputters', () => {
+    const sink: Outputter = () => {}
+    addOutputter(sink)
+    resetOutputters()
+    expect(getOutputters()).toHaveLength(1)
+    expect(getOutputters()).not.toContain(sink)
+  })
+
+  it('should respect log level filtering for custom outputters', () => {
+    setLogLevel(RootNamespace, LogLevel.WARN)
+    const captured: LogLevel[] = []
+    addOutputter((level) => captured.push(level))
+    const log = scopedLog(RootNamespace)
+    log.info('filtered')
+    log.warn('passed')
+    expect(captured).toEqual([LogLevel.WARN])
   })
 })

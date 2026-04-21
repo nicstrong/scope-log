@@ -8,6 +8,10 @@ export {
   getNamespaces,
   shouldLog,
   setLogLevel,
+  addOutputter,
+  removeOutputter,
+  getOutputters,
+  resetOutputters,
 } from './scopedLog.js'
 export type { RootNamespaceType } from './scopedLog.js'
 
