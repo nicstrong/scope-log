@@ -93,8 +93,54 @@ describe('shouldLog — SILENT', () => {
   })
 })
 
-describe('shouldLog — error cases', () => {
-  it('throws when passed a wildcard namespace', () => {
-    expect(() => shouldLog(LogLevel.INFO, 'A:*')).toThrow(/wildcard/i)
+describe('shouldLog — wildcard (cascade-only) queries', () => {
+  it('"$:*" reads back the root cascadingLevel', () => {
+    // Default root cascadingLevel is INFO.
+    expect(shouldLog(LogLevel.INFO, '$:*')).toBe(true)
+    expect(shouldLog(LogLevel.LOG, '$:*')).toBe(false)
+
+    setLogLevel('$:*', LogLevel.DEBUG)
+    expect(shouldLog(LogLevel.DEBUG, '$:*')).toBe(true)
+  })
+
+  it('"A:*" reads back the cascadingLevel written by setLogLevel("A:*", …)', () => {
+    setLogLevel('A:*', LogLevel.DEBUG)
+    expect(shouldLog(LogLevel.DEBUG, 'A:*')).toBe(true)
+    expect(shouldLog(LogLevel.LOG, 'A:*')).toBe(true)
+  })
+
+  it('skips an exact nodeLevel — cascade-only resolution', () => {
+    // `A` has BOTH a nodeLevel (WARN) and a cascadingLevel (DEBUG).
+    setLogLevel('A', LogLevel.WARN)
+    setLogLevel('A:*', LogLevel.DEBUG)
+
+    // Non-wildcard: prefer nodeLevel → WARN caps DEBUG.
+    expect(shouldLog(LogLevel.DEBUG, 'A')).toBe(false)
+    // Wildcard: skip nodeLevel → cascadingLevel DEBUG passes.
+    expect(shouldLog(LogLevel.DEBUG, 'A:*')).toBe(true)
+    // Descendants see the same cascading answer as the wildcard query.
+    expect(shouldLog(LogLevel.DEBUG, 'A:Child')).toBe(true)
+  })
+
+  it('walks up ancestors when the wildcard target has no cascadingLevel', () => {
+    // Only Top:* is set; Top:Mid does not exist yet.
+    setLogLevel('Top:*', LogLevel.DEBUG)
+    expect(shouldLog(LogLevel.DEBUG, 'Top:Mid:*')).toBe(true)
+    expect(shouldLog(LogLevel.DEBUG, 'Top:Mid:Deep:*')).toBe(true)
+  })
+})
+
+describe('shouldLog — invalid forms still throw', () => {
+  it('rejects trailing colon', () => {
+    expect(() => shouldLog(LogLevel.INFO, 'A:')).toThrow(/end with a colon/)
+  })
+  it('rejects empty inner segments', () => {
+    expect(() => shouldLog(LogLevel.INFO, 'A::B')).toThrow(/empty segments/)
+  })
+  it('keeps a non-trailing "*" as a literal segment (not treated as wildcard)', () => {
+    // '*' as a middle segment is kept literal by namespaceParts; the tree
+    // has no such child, so this resolves via ancestor cascadingLevel.
+    expect(shouldLog(LogLevel.INFO, 'A:*:B')).toBe(true) // root INFO cascades
+    expect(shouldLog(LogLevel.DEBUG, 'A:*:B')).toBe(false)
   })
 })

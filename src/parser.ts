@@ -4,14 +4,21 @@ export type RootNamespaceType = typeof RootNamespace
 export const WILDCARD_NAMESPACE_TOKEN = '*'
 export const ROOT_NAMESPACE_KEY = '$'
 
+export function isRootNamespace(
+  namespace: string | RootNamespaceType,
+): namespace is RootNamespaceType | '' | typeof ROOT_NAMESPACE_KEY {
+  return (
+    namespace === RootNamespace ||
+    namespace === '' ||
+    namespace === ROOT_NAMESPACE_KEY
+  )
+}
+
 export function namespaceParts(
   namespace: string | RootNamespaceType,
   allowWildcard: boolean,
 ): [string[], boolean] {
-  if (namespace === RootNamespace) {
-    return [[], false]
-  }
-  if (namespace === '' || namespace === ROOT_NAMESPACE_KEY) {
+  if (isRootNamespace(namespace)) {
     return [[], false]
   }
   if (namespace.endsWith(':')) {

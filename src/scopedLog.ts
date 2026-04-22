@@ -3,10 +3,11 @@ import {
   RootNamespace,
   ROOT_NAMESPACE_KEY,
   WILDCARD_NAMESPACE_TOKEN,
+  isRootNamespace,
   namespaceParts,
   type RootNamespaceType,
 } from './parser.js'
-import { LogLevel, Outputter } from './types.js'
+import { LazyLogThunk, LogLevel, Outputter } from './types.js'
 
 export {
   RootNamespace,
@@ -18,24 +19,36 @@ export {
 export const DEFAULT_ROOT_LEVEL = LogLevel.INFO
 
 export function scopedLog(namespace: string | RootNamespaceType) {
-  const message = typeof namespace === 'symbol' ? undefined : `[${namespace}]`
-  const base = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.LOG, message, ...optionalParams)
+  const prefix = isRootNamespace(namespace) ? null : `[${namespace}]`
+
+  const dispatch = (level: LogLevel, args: readonly unknown[]) => {
+    if (prefix === null) {
+      logToOutputters(namespace, level, ...args)
+    } else {
+      logToOutputters(namespace, level, prefix, ...args)
+    }
   }
-  base.error = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.ERROR, message, ...optionalParams)
+
+  const emit = (level: LogLevel, args: unknown[]) => dispatch(level, args)
+
+  const emitLazy = (level: LogLevel, thunk: LazyLogThunk) => {
+    if (!shouldLog(level, namespace)) return
+    dispatch(level, thunk())
   }
-  base.warn = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.WARN, message, ...optionalParams)
-  }
-  base.info = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.INFO, message, ...optionalParams)
-  }
-  base.log = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.LOG, message, ...optionalParams)
-  }
-  base.debug = (...optionalParams: any[]) => {
-    logToOutputters(namespace, LogLevel.DEBUG, message, ...optionalParams)
+
+  const base = (...args: unknown[]) => emit(LogLevel.LOG, args)
+  base.error = (...args: unknown[]) => emit(LogLevel.ERROR, args)
+  base.warn = (...args: unknown[]) => emit(LogLevel.WARN, args)
+  base.info = (...args: unknown[]) => emit(LogLevel.INFO, args)
+  base.log = (...args: unknown[]) => emit(LogLevel.LOG, args)
+  base.debug = (...args: unknown[]) => emit(LogLevel.DEBUG, args)
+
+  base.lazy = {
+    error: (thunk: LazyLogThunk) => emitLazy(LogLevel.ERROR, thunk),
+    warn: (thunk: LazyLogThunk) => emitLazy(LogLevel.WARN, thunk),
+    info: (thunk: LazyLogThunk) => emitLazy(LogLevel.INFO, thunk),
+    log: (thunk: LazyLogThunk) => emitLazy(LogLevel.LOG, thunk),
+    debug: (thunk: LazyLogThunk) => emitLazy(LogLevel.DEBUG, thunk),
   }
 
   return base
@@ -104,19 +117,23 @@ export function shouldLog(
   checkLevel: LogLevel,
   namespace: string | RootNamespaceType,
 ): boolean {
-  const [parts, _isWildcard] = namespaceParts(namespace, false)
+  // Wildcards are accepted here: `shouldLog(level, 'A:*')` asks the
+  // cascade-only question — "would `level` fire for an arbitrary descendant
+  // of A that has no override of its own?". Non-wildcard queries keep their
+  // prefer-nodeLevel semantics.
+  const [parts, isWildcard] = namespaceParts(namespace, true)
   const [nodes, remaining] = findNearestNode(parts)
   if (nodes.length === 0) {
     throw new Error(`No namespaces found invalid tree.`)
   }
-  if (remaining.length === 0) {
-    // found exact match
+  if (remaining.length === 0 && !isWildcard) {
+    // exact non-wildcard match
     const level = nodes[0]!.nodeLevel ?? nodes[0]!.cascadingLevel
     if (level !== null) {
       return checkLevel <= level
     }
   }
-  // search up till find a cascading level
+  // wildcard, or no exact match — walk up looking for cascadingLevel
   for (const node of nodes) {
     const level = node.cascadingLevel
     if (level !== null) {

@@ -61,6 +61,7 @@ Everything exported from the package root (see [src/index.ts](../src/index.ts)):
 | `resetOutputters`         | function   | Restore the default `[ConsoleOutputter]` list.                  |
 | `LogLevel`                | enum       | Ordered log levels from `SILENT` (0) to `DEBUG` (5).            |
 | `Outputter`               | type       | Function signature for pluggable sinks.                         |
+| `LazyLogThunk`            | type       | `() => readonly unknown[]` — shape of a lazy-log thunk.         |
 | `ConsoleOutputter`        | value      | Default outputter that forwards to `console.*`.                 |
 | `RootNamespace`           | symbol     | Sentinel for "the root" namespace, equivalent to `'$'`.         |
 | `RootNamespaceType`       | type       | `typeof RootNamespace`.                                         |
@@ -96,18 +97,20 @@ A namespace is either:
 - A colon-separated string: `"Customer"`, `"Customer:Registration"`,
   `"Customer:Registration:Portal"`.
 - The root, expressed as the `RootNamespace` symbol or the literal string `"$"`.
-- A wildcard (`setLogLevel` only), formed by appending `":*"` to any namespace,
-  e.g. `"Customer:*"` or `"$:*"` for the whole tree.
+- A wildcard (accepted by `setLogLevel` and `shouldLog`, not by `scopedLog`),
+  formed by appending `":*"` to any namespace, e.g. `"Customer:*"` or `"$:*"`
+  for the whole tree.
 
-### Parsing rules — [src/scopedLog.ts:164](../src/scopedLog.ts)
+### Parsing rules — [src/parser.ts](../src/parser.ts)
 
 The parser (`namespaceParts`) enforces:
 
 - Empty string and `"$"` both resolve to "the root".
 - A namespace may not **end** with `":"` — throws.
 - A namespace may not contain `"::"` (empty segments) — throws.
-- `"*"` is only legal as the **final** segment, and only when the caller allows
-  wildcards (`setLogLevel` does, `shouldLog` and `scopedLog` do not).
+- `"*"` is only legal as the **final** segment. `setLogLevel` and `shouldLog`
+  accept it; `scopedLog` does not (a logger bound to a wildcard has no
+  coherent meaning).
 
 ### The tree — [src/scopedLog.ts:49](../src/scopedLog.ts)
 
@@ -165,9 +168,14 @@ log.debug('raw payload', payload)
 
 - Calling it directly emits at `LogLevel.LOG`.
 - `.log`, `.info`, `.warn`, `.error`, `.debug` emit at the matching level.
-- Every call is prefixed with `[<namespace>]` as the first argument — unless the
-  namespace is the `RootNamespace` symbol, in which case no prefix is added
-  ([src/scopedLog.ts:9](../src/scopedLog.ts)).
+- `.lazy.log`, `.lazy.info`, `.lazy.warn`, `.lazy.error`, `.lazy.debug` take a
+  single thunk (`() => readonly unknown[]`) and only invoke it when the level
+  is enabled for this namespace — see
+  ["Probing before expensive logging"](#3-probing-before-expensive-logging)
+  below.
+- Every call is prefixed with `[<namespace>]` as the first argument — unless
+  the namespace is a root form (`RootNamespace`, `''`, or `'$'`), in which
+  case no prefix is added ([src/scopedLog.ts](../src/scopedLog.ts)).
 
 A typical pattern is one logger per module:
 
@@ -209,18 +217,104 @@ The resolution rules above mean that:
   the wildcard).
 - A `log.debug(...)` in `Admin` will not fire (falls back to the root `WARN`).
 
-### 3. Probing before expensive logging
+### 3. Deferring expensive argument construction
+
+The eager methods evaluate their arguments unconditionally — `log.debug(JSON.stringify(big))`
+still serialises `big` when the level is filtered out. Two escape hatches, in
+order of preference:
+
+#### `log.lazy.*` — thunked arguments (recommended)
+
+Each level has a `.lazy` mirror that takes a single thunk returning the arg
+array. The thunk runs **only** when `shouldLog(level, namespace)` passes for
+this logger, so expensive work is skipped wholesale when the level is off.
+
+```ts
+import { scopedLog } from 'scope-log'
+const log = scopedLog('Checkout:Pricing')
+
+// Eager — serialises on every call, even when DEBUG is filtered.
+log.debug('cart snapshot', JSON.stringify(cart))
+
+// Lazy — thunk runs only when DEBUG is enabled for Checkout:Pricing.
+log.lazy.debug(() => ['cart snapshot', JSON.stringify(cart)])
+```
+
+Contract:
+
+- The thunk receives no arguments and returns a `readonly unknown[]` that is
+  spread into the outputter after the `[namespace]` prefix (or with no prefix
+  for root loggers).
+- The thunk is invoked **at most once** per call — zero times if the level is
+  filtered, exactly once otherwise.
+- Errors thrown from the thunk propagate to the caller (when the level fires);
+  if the level is filtered the thunk never runs, so no error is raised.
+- `log.debug(fn)` is unchanged — the eager methods still log function
+  references as-is. Lazy is strictly opt-in via `.lazy`.
+
+When to reach for `.lazy`:
+
+| Argument shape | Pick |
+| --- | --- |
+| Primitives / already-built objects (`log.info('ok', userId)`) | eager |
+| `JSON.stringify(big)` / `obj.toString()` on large data | **lazy** |
+| Template string with function calls (`` `${items.map(...).join(',')}` ``) | **lazy** |
+| `deepClone(state)` for a snapshot | **lazy** |
+| Iterating a collection to build a summary | **lazy** |
+
+Examples:
+
+```ts
+// 1. Multiple expensive args — all deferred together.
+log.lazy.debug(() => [
+  'tax breakdown',
+  computeTaxLines(cart),
+  computeFees(cart),
+])
+
+// 2. Reference identity is preserved — the returned array is spread, not
+//    re-cloned, so `payload` reaches the outputter by reference.
+const payload = { userId: 42, cart }
+log.lazy.debug(() => ['payload', payload])
+
+// 3. Root logger — no prefix, identical to eager.
+scopedLog(RootNamespace).lazy.info(() => ['plain message'])
+
+// 4. Don't over-engineer cheap calls.
+log.lazy.info(() => ['order placed', orderId]) // wasteful — just use log.info
+log.info('order placed', orderId)              // prefer this
+```
+
+#### `shouldLog(level, namespace)` — imperative guard
+
+Still useful when the guard should cover a **block** of work, not just one
+log call (e.g. building intermediate state used by several logs):
 
 ```ts
 import { shouldLog, LogLevel } from 'scope-log'
 
 if (shouldLog(LogLevel.DEBUG, 'Checkout:Pricing')) {
-  log.debug('expensive snapshot', JSON.stringify(largeObject))
+  const summary = buildHeavySummary(cart)
+  log.debug('summary', summary)
+  log.debug('hash', hash(summary))
 }
 ```
 
-Useful when a log argument is expensive to compute — the normal call path still
-computes arguments eagerly because `.debug(...)` is a regular function call.
+For the single-log-call case, `log.lazy.*` is shorter and keeps the namespace
+implicit.
+
+`shouldLog` also accepts a trailing wildcard for *subtree* queries — useful
+for dev tooling that wants to answer "would anything under `A` log at this
+level?" without picking a specific descendant:
+
+```ts
+// After setLogLevel('Checkout:*', LogLevel.DEBUG)
+shouldLog(LogLevel.DEBUG, 'Checkout:*')  // → true  (cascade-only)
+shouldLog(LogLevel.DEBUG, 'Checkout')    // → depends on Checkout's nodeLevel
+```
+
+The wildcard form skips any `nodeLevel` set on the target and resolves via
+`cascadingLevel` only — exactly mirroring what `setLogLevel('A:*', …)` wrote.
 
 ### 4. Custom outputters
 
@@ -289,6 +383,31 @@ uiLog.info('rendered header')      // ❌ skipped — falls back to $:* = WARN
 uiLog.warn('slow paint')           // ✅ logs
 ```
 
+### Example: zero-cost debug logging on hot paths
+
+```ts
+import { scopedLog } from 'scope-log'
+
+const log = scopedLog('Render:Frame')
+
+function onFrame(scene: Scene) {
+  // Runs 60 times a second. In production the subtree sits at WARN; the
+  // thunk never runs and the summary is never built.
+  log.lazy.debug(() => [
+    'frame',
+    scene.id,
+    `${scene.nodes.length} nodes, ${scene.lights.length} lights`,
+    JSON.stringify(scene.camera),
+  ])
+
+  // …render…
+}
+
+// During an investigation:
+//   setLogLevel('Render:*', LogLevel.DEBUG)
+// flips the thunk on — no code change, no redeploy.
+```
+
 ### Example: runtime control from the browser console
 
 Expose the setter once during bootstrap and you can reconfigure verbosity live:
@@ -324,17 +443,25 @@ beforeEach(() => {
   singletons. If the package ends up loaded more than once (e.g. via duplicate
   copies in `node_modules`), each copy has its own tree — levels set in one
   won't be seen by the other.
-- **Root-level logging.** A logger created with `scopedLog(RootNamespace)`
-  emits **without** a `[prefix]`. Any other value — including `'$'` — would
-  produce `[$]` in the output, so prefer the symbol when you want a "plain"
-  logger.
+- **Root-level logging.** `scopedLog(RootNamespace)`, `scopedLog('$')` and
+  `scopedLog('')` are equivalent: all three emit **without** a `[prefix]` and
+  pass the caller's arguments straight through to outputters — no synthetic
+  `undefined` leads the argument list. Use whichever form reads best; the
+  `RootNamespace` symbol is still the most intention-revealing.
 - **Wildcard is trailing-only.** `"A:*:C"` throws; `"*"` alone is also not
   accepted outside of `"$:*"` semantics (the parser pops the trailing `*` then
   requires the remaining parts to be a valid namespace).
-- **`shouldLog` rejects wildcards.** Only `setLogLevel` accepts the `:*` form.
-  Passing `"A:*"` to `shouldLog` throws.
-- **Arguments are always evaluated.** `log.debug(expensive())` calls
-  `expensive()` regardless of level — `shouldLog` is the escape hatch.
+- **`shouldLog` wildcards are cascade-only.** `shouldLog(level, 'A:*')` asks
+  "would `level` fire for an arbitrary descendant of `A` that has no override
+  of its own?" — it deliberately skips any `nodeLevel` on `A` itself and
+  resolves via `cascadingLevel` only. This is the mirror of
+  `setLogLevel('A:*', …)`, which writes to the same slot. Non-wildcard queries
+  (`shouldLog(level, 'A')`) keep their prefer-nodeLevel semantics.
+- **Eager arguments are always evaluated.** `log.debug(expensive())` calls
+  `expensive()` regardless of level. Use `log.lazy.debug(() => [expensive()])`
+  to defer — the thunk runs only when the level is enabled. `shouldLog(...)`
+  remains available for guarding blocks of work that span multiple log calls
+  (see [§3](#3-deferring-expensive-argument-construction)).
 - **`SILENT`.** Setting any namespace to `LogLevel.SILENT` (0) makes every
   `shouldLog(level, ns)` return `false` for `level >= 1`, effectively muting
   that subtree.
@@ -348,15 +475,17 @@ beforeEach(() => {
 
 ## Summary for consumers
 
-If you remember three things:
+If you remember four things:
 
 1. `const log = scopedLog('Feature:Area')` gives you `log`, `log.info`,
    `log.warn`, `log.error`, `log.debug`, `log.log`.
-2. `setLogLevel('Feature:*', LogLevel.DEBUG)` turns a whole subtree on;
+2. `log.lazy.debug(() => [...])` defers expensive arg construction — the thunk
+   only runs when the level is enabled for this namespace.
+3. `setLogLevel('Feature:*', LogLevel.DEBUG)` turns a whole subtree on;
    `setLogLevel('Feature:Area', LogLevel.WARN)` narrows a single node.
-3. Exact match wins; otherwise the nearest wildcard ancestor wins; ultimately
+4. Exact match wins; otherwise the nearest wildcard ancestor wins; ultimately
    the root (`INFO` by default) wins.
 
 Everything else — `shouldLog`, `reset`, `getNamespaces`, `Outputter`,
-`addOutputter` / `removeOutputter`, `RootNamespace` — is there for tests,
-tooling, and extension points.
+`LazyLogThunk`, `addOutputter` / `removeOutputter`, `RootNamespace` — is there
+for tests, tooling, and extension points.

@@ -15,7 +15,7 @@ export {
 } from './scopedLog.js'
 export type { RootNamespaceType } from './scopedLog.js'
 
-export type { Outputter } from './types.js'
+export type { Outputter, LazyLogThunk } from './types.js'
 export { LogLevel } from './types.js'
 
 export { ConsoleOutputter } from './console-outputter.js'

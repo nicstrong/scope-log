@@ -44,9 +44,36 @@ describe('scopedLog — logger factory', () => {
   }) => {
     const log = scopedLog(RootNamespace)
     log.info('plain')
-    expect(captureAtDebug).toEqual([
-      { level: LogLevel.INFO, args: [undefined, 'plain'] },
-    ])
+    expect(captureAtDebug).toEqual([{ level: LogLevel.INFO, args: ['plain'] }])
+  })
+
+  it.for([
+    { label: "'$'", ns: '$' },
+    { label: "''", ns: '' },
+  ] as const)(
+    'emits without a prefix when the namespace is $label (root equivalent)',
+    ({ ns }, { captureAtDebug }) => {
+      const log = scopedLog(ns)
+      log.info('plain')
+      expect(captureAtDebug).toEqual([
+        { level: LogLevel.INFO, args: ['plain'] },
+      ])
+    },
+  )
+
+  it('RootNamespace, "$" and "" are byte-identical at the outputter', ({
+    captureAtDebug,
+  }) => {
+    scopedLog(RootNamespace).info('x', 1)
+    scopedLog('$').info('x', 1)
+    scopedLog('').info('x', 1)
+    expect(captureAtDebug).toHaveLength(3)
+    expect(captureAtDebug[0]).toEqual(captureAtDebug[1])
+    expect(captureAtDebug[1]).toEqual(captureAtDebug[2])
+    expect(captureAtDebug[0]).toEqual({
+      level: LogLevel.INFO,
+      args: ['x', 1],
+    })
   })
 
   it('forwards arguments in order, as-is', ({ captureAtDebug }) => {

@@ -1,4 +1,4 @@
-import { describe, expect } from 'vitest'
+import { describe, expect, vi } from 'vitest'
 import {
   addOutputter,
   removeOutputter,
@@ -125,7 +125,30 @@ describe('smoke — consumer examples', () => {
   }) => {
     scopedLog(RootNamespace).info('plain message')
     expect(captureAtDebug).toEqual([
-      { level: LogLevel.INFO, args: [undefined, 'plain message'] },
+      { level: LogLevel.INFO, args: ['plain message'] },
+    ])
+  })
+
+  it('8. lazy logging skips the thunk when the level is filtered, runs it when widened (docs/analysis.md lazy section)', ({
+    capture,
+  }) => {
+    const log = scopedLog('Checkout:Pricing')
+    const heavy = vi.fn(() => ['cart snapshot', JSON.stringify({ big: 1 })])
+
+    // Default root is INFO — DEBUG is filtered out.
+    log.lazy.debug(heavy)
+    expect(heavy).not.toHaveBeenCalled()
+    expect(capture).toHaveLength(0)
+
+    // Widen the subtree; the thunk now runs.
+    setLogLevel('Checkout:*', LogLevel.DEBUG)
+    log.lazy.debug(heavy)
+    expect(heavy).toHaveBeenCalledTimes(1)
+    expect(capture).toEqual([
+      {
+        level: LogLevel.DEBUG,
+        args: ['[Checkout:Pricing]', 'cart snapshot', '{"big":1}'],
+      },
     ])
   })
 })

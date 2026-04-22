@@ -12,3 +12,5 @@ export type Outputter = (
   message?: any,
   ...optionalArgs: any[]
 ) => void
+
+export type LazyLogThunk = () => readonly unknown[]
