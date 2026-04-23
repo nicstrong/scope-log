@@ -7,6 +7,12 @@ import {
   namespaceParts,
   type RootNamespaceType,
 } from './parser.js'
+import {
+  createRootNode,
+  DEFAULT_ROOT_LEVEL,
+  getRegistry,
+  type NamespaceNode,
+} from './registry.js'
 import { LazyLogThunk, LogLevel, Outputter } from './types.js'
 
 export {
@@ -14,9 +20,8 @@ export {
   ROOT_NAMESPACE_KEY,
   WILDCARD_NAMESPACE_TOKEN,
   type RootNamespaceType,
+  DEFAULT_ROOT_LEVEL,
 }
-
-export const DEFAULT_ROOT_LEVEL = LogLevel.INFO
 
 export function scopedLog(namespace: string | RootNamespaceType) {
   const prefix = isRootNamespace(namespace) ? null : `[${namespace}]`
@@ -54,13 +59,12 @@ export function scopedLog(namespace: string | RootNamespaceType) {
   return base
 }
 
-let outputters: Outputter[] = [ConsoleOutputter]
-
 export function addOutputter(outputter: Outputter): void {
-  outputters.push(outputter)
+  getRegistry().outputters.push(outputter)
 }
 
 export function removeOutputter(outputter: Outputter): boolean {
+  const outputters = getRegistry().outputters
   const index = outputters.indexOf(outputter)
   if (index === -1) return false
   outputters.splice(index, 1)
@@ -68,11 +72,15 @@ export function removeOutputter(outputter: Outputter): boolean {
 }
 
 export function getOutputters(): readonly Outputter[] {
-  return outputters
+  return getRegistry().outputters
 }
 
 export function resetOutputters(): void {
-  outputters = [ConsoleOutputter]
+  // Mutate in place so callers that captured the array via `getOutputters()`
+  // see the reset, rather than silently holding a stale reference.
+  const outputters = getRegistry().outputters
+  outputters.length = 0
+  outputters.push(ConsoleOutputter)
 }
 
 function logToOutputters(
@@ -82,35 +90,19 @@ function logToOutputters(
   ...optionalParams: any[]
 ) {
   if (shouldLog(level, namespace))
-    for (const outputter of outputters) {
+    for (const outputter of getRegistry().outputters) {
       outputter(level, message, ...optionalParams)
     }
 }
 
-type NamespaceNode = {
-  namespacePart: string
-  children: Map<string, NamespaceNode>
-  nodeLevel: LogLevel | null
-  cascadingLevel: LogLevel | null
-}
-
-function createRootNode(): NamespaceNode {
-  return {
-    namespacePart: ROOT_NAMESPACE_KEY,
-    children: new Map<string, NamespaceNode>(),
-    nodeLevel: null,
-    cascadingLevel: DEFAULT_ROOT_LEVEL,
-  }
-}
-
-let _namespaces = createRootNode()
-
 export function getNamespaces(): NamespaceNode {
-  return _namespaces
+  return getRegistry().namespaces
 }
 
 export function reset() {
-  _namespaces = createRootNode()
+  // Replace the tree on the shared registry. The registry object itself is
+  // stable across the call; every accessor re-reads `namespaces` through it.
+  getRegistry().namespaces = createRootNode()
 }
 
 export function shouldLog(
@@ -191,7 +183,7 @@ export function setLogLevel(
 function findNearestNode(
   namespaceParts: string[],
 ): readonly [NamespaceNode[], string[]] {
-  let currentNode = _namespaces
+  let currentNode = getRegistry().namespaces
   const visited: NamespaceNode[] = [currentNode]
   for (let i = 0; i < namespaceParts.length; i++) {
     const part = namespaceParts[i]!

@@ -151,4 +151,34 @@ describe('smoke — consumer examples', () => {
       },
     ])
   })
+
+  it('9. duplicate installs share state via the global registry (docs/analysis.md shared-registry)', async () => {
+    // Simulates a consumer with two copies of `scope-log` in node_modules —
+    // e.g. `your-app` pulls 1.0.x, and `some-lib` pulls an adjacent 1.0.x
+    // in its nested node_modules. Both resolve to different file paths, so
+    // each gets its own module instance — but they cooperate via the shared
+    // registry on globalThis, so setLogLevel on one is visible to the other.
+    vi.resetModules()
+    delete (globalThis as unknown as Record<symbol, unknown>)[
+      Symbol.for('scope-log/registry@1')
+    ]
+
+    const yourApp = await import('./scopedLog.js')
+    vi.resetModules()
+    const someLib = await import('./scopedLog.js')
+
+    // The bootstrap in your-app turns DEBUG on for a third-party subtree.
+    yourApp.setLogLevel('ThirdParty:*', LogLevel.DEBUG)
+
+    // some-lib's deep-import logger sees the level change — despite being
+    // a different module instance.
+    expect(someLib.shouldLog(LogLevel.DEBUG, 'ThirdParty:Auth:Token')).toBe(
+      true,
+    )
+
+    // Cleanup — this test doesn't use the capture fixture so we reset
+    // explicitly to avoid leaking state into later tests.
+    yourApp.reset()
+    yourApp.resetOutputters()
+  })
 })

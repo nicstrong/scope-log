@@ -13,11 +13,15 @@ the native console:
    touching call sites.
 
 The package is pure ESM, ships its own type declarations, and has a single
-runtime dependency model: the global singleton namespace tree lives inside the
-module.
+runtime dependency model: the namespace tree and outputter list live on a
+**shared registry** stashed at `globalThis[Symbol.for('scope-log/registry@1')]`,
+so multiple copies of the package loaded into the same realm (duplicate
+`node_modules`, monorepo linking, dual entry points) cooperate on one tree
+and one outputter list instead of silently diverging.
 
 - Entry point: [src/index.ts](../src/index.ts)
 - Core logic: [src/scopedLog.ts](../src/scopedLog.ts)
+- Shared registry: [src/registry.ts](../src/registry.ts)
 - Public types: [src/types.ts](../src/types.ts)
 - Default outputter: [src/console-outputter.ts](../src/console-outputter.ts)
 
@@ -357,7 +361,18 @@ restores the default `[ConsoleOutputter]` — useful in tests.
 - `reset()` throws the tree away and re-creates the root with
   `DEFAULT_ROOT_LEVEL`. Call it in `beforeEach` in tests to get deterministic
   behaviour — that's how the project's own suite works
-  ([src/scopedLog.test.ts:92](../src/scopedLog.test.ts)).
+  ([src/scopedLog.test.ts](../src/scopedLog.test.ts)).
+- `reset()` and `resetOutputters()` mutate the **shared registry in place**.
+  That matters for two reasons:
+  1. A test that captured the outputter list via `getOutputters()` before
+     calling `resetOutputters()` sees the reset — the array reference stays
+     live, it's just emptied and re-seeded with `ConsoleOutputter`. No
+     stale-view foot-gun.
+  2. Vitest's per-file module isolation no longer gives you a free reset
+     between test files, because the registry lives on `globalThis`, not on
+     the module. Rely on explicit `reset()` + `resetOutputters()` calls in
+     your test setup — see [src/test-utils.ts](../src/test-utils.ts) for
+     the project's own fixture.
 
 ---
 
@@ -439,10 +454,25 @@ beforeEach(() => {
 
 ## Behaviour and edge cases worth knowing
 
-- **Global state.** The namespace tree and outputter list are module-level
-  singletons. If the package ends up loaded more than once (e.g. via duplicate
-  copies in `node_modules`), each copy has its own tree — levels set in one
-  won't be seen by the other.
+- **Shared registry.** The namespace tree and outputter list live on
+  `globalThis[Symbol.for('scope-log/registry@1')]`. Multiple copies of
+  `scope-log` loaded into the same realm — duplicate `node_modules`,
+  monorepo source-vs-dist linking, dual ESM/CJS entry points — cooperate
+  on a single registry, so `setLogLevel` and `addOutputter` calls from
+  one copy are visible to all the others. Three caveats worth knowing:
+  - **Cross-major copies are intentionally isolated.** A hypothetical
+    `scope-log` 2.x would use `@2` in its registry key, keeping its state
+    separate from 1.x's. If a dependency tree ever mixes majors, each
+    major gets its own tree — the least-bad outcome when internals
+    diverge.
+  - **Cross-realm copies are also separate.** Server and client in SSR,
+    main vs. renderer in Electron, the host page and a web worker — each
+    realm has its own `globalThis`, so logging state doesn't leak across
+    them. Usually what you want.
+  - **Sealed `globalThis` falls back to per-copy state.** In locked-down
+    sandboxes where assignment to `globalThis` throws, each copy reverts
+    to its own in-memory registry (the original pre-fix behaviour). No
+    crash, but sharing is lost in that environment.
 - **Root-level logging.** `scopedLog(RootNamespace)`, `scopedLog('$')` and
   `scopedLog('')` are equivalent: all three emit **without** a `[prefix]` and
   pass the caller's arguments straight through to outputters — no synthetic
